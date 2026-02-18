@@ -79,14 +79,34 @@ def _log_M2(alpha: Tensor) -> Tensor:
 
     where Phi is the standard normal CDF and phi is the standard normal PDF.
 
+    For large negative alpha, direct computation suffers from catastrophic
+    cancellation. We use torch.special.log_ndtr for the tail, which provides
+    correct values and gradients even for alpha << 0.
+
     Reference: Paine et al. (2018), Stat Comput 28:689-697, Equation (4).
     """
+    # Direct computation (accurate for moderate alpha)
     log_phi = -0.5 * alpha ** 2 - 0.5 * np.log(2 * np.pi)
     phi = torch.exp(log_phi)
     Phi = 0.5 * (1.0 + torch.erf(alpha / np.sqrt(2)))
-    M2 = (1.0 + alpha ** 2) * Phi + alpha * phi
-    M2 = torch.clamp(M2, min=1e-40)
-    return torch.log(M2)
+    M2_direct = (1.0 + alpha ** 2) * Phi + alpha * phi
+
+    # Stable computation for large negative alpha:
+    #   M₂(α) = Φ(α) · [(1+α²) + α · φ(α)/Φ(α)]
+    #   log M₂ = log Φ(α) + log[(1+α²) + α · exp(log φ(α) - log Φ(α))]
+    # log_ndtr is not implemented for half/bfloat16 on CPU, so upcast if needed.
+    needs_upcast = alpha.dtype in (torch.float16, torch.bfloat16) and not alpha.is_cuda
+    if needs_upcast:
+        log_Phi = torch.special.log_ndtr(alpha.float()).to(alpha.dtype)
+    else:
+        log_Phi = torch.special.log_ndtr(alpha)
+    ratio = alpha * torch.exp(log_phi - log_Phi)
+    inner = (1.0 + alpha ** 2) + ratio
+    # inner should be positive; clamp to avoid log(0) from numerical noise
+    M2_stable = log_Phi + torch.log(torch.clamp(inner, min=1e-40))
+
+    # Use direct for alpha >= -6, stable form for alpha < -6
+    return torch.where(alpha >= -6.0, torch.log(torch.clamp(M2_direct, min=1e-40)), M2_stable)
 
 
 def _construct_orthonormal_basis(mu: Tensor) -> Tuple[Tensor, Tensor]:
