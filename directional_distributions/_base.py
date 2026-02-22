@@ -109,6 +109,45 @@ def _log_M2(alpha: Tensor) -> Tensor:
     return torch.where(alpha >= -6.0, torch.log(torch.clamp(M2_direct, min=1e-40)), M2_stable)
 
 
+def _sc_log_density(A: Tensor, B: Tensor, Gamma_sq: Tensor) -> Tensor:
+    """Compute the log-density kernel shared by all spherical projected Cauchy distributions.
+
+    Given the three intermediate quantities from the projected Cauchy on S²,
+    returns the log-PDF assuming |Σ| = 1.
+
+    The density (Tsagris & Alzeley, 2024, Eq. 18 with |Σ|=1) simplifies to:
+
+        log f = -log(4π²) - log(B) - 1.5·log(Δ) + log[B(Γ²+1)·Ω + 2A√Δ]
+
+    where Δ = B(Γ²+1) - A²  and  Ω = 2(π - atan2(√Δ, A)).
+
+    Reference: Tsagris & Alzeley (2024), "Circular and Spherical Projected
+    Cauchy Distributions", arXiv:2302.02468v4, Equation (18).
+
+    Args:
+        A: [...] y⊤Σ⁻¹μ.
+        B: [...] y⊤Σ⁻¹y (positive).
+        Gamma_sq: [...] μ⊤Σ⁻¹μ (non-negative).
+
+    Returns:
+        [...] log-probability density values (same shape as inputs).
+    """
+    Gamma_sq_p1 = Gamma_sq + 1.0
+    Delta = B * Gamma_sq_p1 - A ** 2               # >= B > 0 by Cauchy-Schwarz
+    Delta = torch.clamp(Delta, min=1e-8)
+
+    sqrt_Delta = torch.sqrt(Delta)
+    Omega = 2.0 * (np.pi - torch.atan2(sqrt_Delta, A))
+
+    inner = B * Gamma_sq_p1 * Omega + 2.0 * A * sqrt_Delta
+    inner = torch.clamp(inner, min=1e-30)
+
+    return (-np.log(4.0 * np.pi ** 2)
+            - torch.log(torch.clamp(B, min=1e-8))
+            - 1.5 * torch.log(Delta)
+            + torch.log(inner))
+
+
 def _construct_orthonormal_basis(mu: Tensor) -> Tuple[Tensor, Tensor]:
     """Construct two orthonormal vectors perpendicular to mu using Gram-Schmidt.
 
@@ -146,6 +185,43 @@ def _construct_orthonormal_basis(mu: Tensor) -> Tuple[Tensor, Tensor]:
     xi2 = F.normalize(xi2, p=2, dim=1)
 
     return xi1, xi2
+
+
+# ---------------------------------------------------------------------------
+# Cholesky parameterization utilities (used by GAG / GSPC)
+# ---------------------------------------------------------------------------
+
+def _build_cholesky(pred: Tensor) -> Tensor:
+    """Construct the normalised lower-triangular Cholesky factor L from raw
+    network outputs.
+
+    Args:
+        pred: [B, 9] where pred[:, 3:6] are raw log-diagonal entries and
+              pred[:, 6:9] are off-diagonal entries (L₂₁, L₃₁, L₃₂).
+
+    Returns:
+        L: [B, 3, 3] lower-triangular with det(L) = 1 and V⁻¹ = LLᵀ SPD.
+    """
+    B = pred.shape[0]
+    device, dtype = pred.device, pred.dtype
+
+    raw_log_diag = pred[:, 3:6]   # [B, 3]
+    off_diag = pred[:, 6:9]       # [B, 3]  → L₂₁, L₃₁, L₃₂
+
+    # Centre log-diagonal so that sum = 0  ⟹  det(L) = exp(0) = 1
+    log_diag = raw_log_diag - raw_log_diag.mean(dim=1, keepdim=True)
+    diag = torch.exp(log_diag)    # [B, 3], always positive, product = 1
+
+    # Assemble L  (lower triangular)
+    L = torch.zeros(B, 3, 3, device=device, dtype=dtype)
+    L[:, 0, 0] = diag[:, 0]
+    L[:, 1, 1] = diag[:, 1]
+    L[:, 2, 2] = diag[:, 2]
+    L[:, 1, 0] = off_diag[:, 0]   # L₂₁
+    L[:, 2, 0] = off_diag[:, 1]   # L₃₁
+    L[:, 2, 1] = off_diag[:, 2]   # L₃₂
+
+    return L
 
 
 # ---------------------------------------------------------------------------

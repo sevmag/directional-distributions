@@ -9,16 +9,15 @@ from ._base import BaseDistribution
 
 
 def von_mises_fisher_loss(
-    n_pred: Tensor, n_true: Tensor, kappa_reg: float = 0.01, eps: float = 1e-8
+    n_pred: Tensor, n_true: Tensor, kappa_reg: float = 0.0, eps: float = 1e-8
 ) -> Tensor:
     """
-    von Mises-Fisher loss with decoupled direction and κ.
+    von Mises-Fisher loss with coupled direction and κ.
 
-    Expects n_pred [B,4]: direction = n_pred[:,:3], κ = softplus(n_pred[:,3]).
-    The κ head is regularized to prevent explosion while preserving vMF gradient scaling.
+    Expects n_pred [B,3]: direction = normalize(n_pred), κ = ||n_pred||.
     """
-    direction = F.normalize(n_pred[:, :3], p=2, dim=1)
-    kappa = F.softplus(n_pred[:, 3]) + 0.1
+    direction = F.normalize(n_pred, p=2, dim=1)
+    kappa = n_pred.norm(p=2, dim=1)
     cos_sim = (direction * n_true).sum(dim=1)
     log_C = -kappa + torch.log((kappa + eps) / (1 - torch.exp(-2 * kappa) + 2 * eps))
     return (-(kappa * cos_sim + log_C) + kappa_reg * kappa).mean()
@@ -33,23 +32,24 @@ class VMF(BaseDistribution):
 
     where C(κ) = κ / (4π sinh(κ)) is the normalization constant.
 
+    Direction and concentration are coupled: the network outputs μ ∈ ℝ³,
+    with direction = μ/||μ|| and κ = ||μ||.
+
     Args:
-        pred: [B, 4] raw network output where pred[:, :3] is the
-            (unnormalized) direction and pred[:, 3] is the raw κ
-            (before softplus).
+        pred: [B, 3] raw network output (the mean vector μ).
     """
 
-    n_params = 4
+    n_params = 3
 
     @property
     def mean_direction(self) -> Tensor:
         """Unit mean direction [B, 3]."""
-        return F.normalize(self._pred[:, :3], p=2, dim=1)
+        return F.normalize(self._pred, p=2, dim=1)
 
     @property
     def kappa(self) -> Tensor:
-        """Concentration parameter κ [B]. Always >= 0.1."""
-        return F.softplus(self._pred[:, 3]) + 0.1
+        """Concentration parameter κ = ||μ|| [B]."""
+        return self._pred.norm(p=2, dim=1)
 
     def log_pdf(self, points: Tensor, eps: float = 1e-8) -> Tensor:
         """Evaluate log f(y | μ, κ) at points on S².
@@ -61,19 +61,18 @@ class VMF(BaseDistribution):
         Returns:
             [B, N] log-probability density.
         """
-        mu = self.mean_direction  # [B, 3]
+        mu = self._pred          # [B, 3]
         kappa = self.kappa        # [B]
 
-        cos_sim = points @ mu.T  # [N, B]
+        # κ μ̂·y = ||μ|| (μ/||μ||)·y = μ·y
+        dot = points @ mu.T  # [N, B]
 
         # log C(κ) = log(κ / (4π sinh(κ)))
         #          = log(κ) - log(2π) - κ - log(1 - exp(-2κ))
-        # The loss function omits -log(2π) since it's constant w.r.t. parameters,
-        # but here we need the proper normalization for a valid PDF.
         log_C = (
             -kappa
             + torch.log((kappa + eps) / (1 - torch.exp(-2 * kappa) + 2 * eps))
             - np.log(2 * np.pi)
         )
 
-        return (log_C[None, :] + kappa[None, :] * cos_sim).T  # [B, N]
+        return (log_C[None, :] + dot).T  # [B, N]

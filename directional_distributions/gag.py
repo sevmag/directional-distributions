@@ -28,44 +28,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._base import BaseDistribution, _log_M2
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _build_cholesky(pred: Tensor) -> Tensor:
-    """Construct the normalised lower-triangular Cholesky factor L from raw
-    network outputs.
-
-    Args:
-        pred: [B, 9] where pred[:, 3:6] are raw log-diagonal entries and
-              pred[:, 6:9] are off-diagonal entries (L₂₁, L₃₁, L₃₂).
-
-    Returns:
-        L: [B, 3, 3] lower-triangular with det(L) = 1 and V⁻¹ = LLᵀ SPD.
-    """
-    B = pred.shape[0]
-    device, dtype = pred.device, pred.dtype
-
-    raw_log_diag = pred[:, 3:6]   # [B, 3]
-    off_diag = pred[:, 6:9]       # [B, 3]  → L₂₁, L₃₁, L₃₂
-
-    # Centre log-diagonal so that sum = 0  ⟹  det(L) = exp(0) = 1
-    log_diag = raw_log_diag - raw_log_diag.mean(dim=1, keepdim=True)
-    diag = torch.exp(log_diag)    # [B, 3], always positive, product = 1
-
-    # Assemble L  (lower triangular)
-    L = torch.zeros(B, 3, 3, device=device, dtype=dtype)
-    L[:, 0, 0] = diag[:, 0]
-    L[:, 1, 1] = diag[:, 1]
-    L[:, 2, 2] = diag[:, 2]
-    L[:, 1, 0] = off_diag[:, 0]   # L₂₁
-    L[:, 2, 0] = off_diag[:, 1]   # L₃₁
-    L[:, 2, 1] = off_diag[:, 2]   # L₃₂
-
-    return L
+from ._base import BaseDistribution, _build_cholesky, _log_M2
 
 
 # ---------------------------------------------------------------------------
