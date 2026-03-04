@@ -4,6 +4,7 @@ from .vmf import von_mises_fisher_loss, VMF
 from .ag import iag_nll_loss, IAG, esag_nll_loss, ESAG, gag_nll_loss, GAG
 from .ps import ps_nll_loss, PowerSpherical
 from .pc import sipc_nll_loss, SIPC, sespc_nll_loss, SESPC, gspc_nll_loss, GSPC
+from .pt import ipt_nll_loss, IPT, ept_nll_loss, EPT, gpt_nll_loss, GPT
 from ._base import SphereGrid, make_grid
 from ._plotting import plot_mollweide, set_style, COLOR_CYCLE
 
@@ -19,6 +20,10 @@ __all__ = [
     "sipc_nll_loss",
     "sespc_nll_loss",
     "gspc_nll_loss",
+    # Loss functions (Projected t family)
+    "ipt_nll_loss",
+    "ept_nll_loss",
+    "gpt_nll_loss",
     # Distribution classes (Angular Gaussian family)
     "VMF",
     "IAG",
@@ -30,6 +35,10 @@ __all__ = [
     "SIPC",
     "SESPC",
     "GSPC",
+    # Distribution classes (Projected t family)
+    "IPT",
+    "EPT",
+    "GPT",
     # Grid utilities
     "SphereGrid",
     "make_grid",
