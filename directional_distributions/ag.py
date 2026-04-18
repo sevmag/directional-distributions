@@ -67,11 +67,34 @@ def _log_M2(alpha: Tensor) -> Tensor:
     return torch.where(alpha >= -3.5, torch.log(torch.clamp(M2_direct, min=1e-40)), M2_stable)
 
 
+def _beta_nll_reduce(nll: Tensor, precision_sq: Tensor, beta: float, eps: float = 1e-8) -> Tensor:
+    """Per-sample β-NLL reduction (Seitzer et al. 2022, ICLR; Eq. 7).
+
+    Weights each sample by detach(σ²)^β = precision_sq^(-β), where precision_sq
+    is the predicted concentration scalar (the 1/σ² analogue for AG distributions:
+    ||μ||² for IAG/ESAG, μᵀV⁻¹μ for GAG). β=0 recovers the standard mean-NLL
+    exactly; β=1 fully decouples mean and variance learning.
+
+    The weight is detached (stop-gradient) so it acts as an adaptive per-sample
+    learning rate. β-NLL targets the over-confidence feedback loop in which
+    confident samples dominate the gradient, inflating predicted concentration
+    faster than direction quality improves.
+
+    Note: per Seitzer §4.1, the β-NLL value is not a meaningful evaluation
+    metric — monitor convergence with β=0 (standard NLL) and/or RMSE on the
+    direction.
+    """
+    if beta == 0.0:
+        return nll.mean()
+    weight = precision_sq.detach().clamp_min(eps).pow(-beta)
+    return (weight * nll).mean()
+
+
 # ---------------------------------------------------------------------------
 # Isotropic Angular Gaussian (IAG)
 # ---------------------------------------------------------------------------
 
-def iag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def iag_nll_loss(pred: Tensor, y_true: Tensor, beta: float = 0.5) -> Tensor:
     """
     Isotropic Angular Gaussian (IAG) negative log-likelihood loss.
 
@@ -92,9 +115,14 @@ def iag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
         pred: [B, 3] predicted mean vectors mu. The magnitude ||mu|| controls
               concentration (higher = more peaked), and mu/||mu|| is the mean direction.
         y_true: [B, 3] true unit direction vectors on S^2.
+        beta: β-NLL weighting (Seitzer et al. 2022). Each sample is reweighted
+              by detach(||mu||^2)^(-beta) to decouple direction- and
+              concentration-head learning. beta=0 recovers the standard mean
+              NLL exactly; beta in [0.5, 1.0] mitigates concentration-head
+              overconfidence. Default 0.5.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Scalar (β-)NLL loss over the batch.
     """
     mu = pred  # [B, 3]
 
@@ -111,7 +139,7 @@ def iag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
     # NLL = log(2pi) + 0.5*(||mu||^2 - (y.mu)^2) - log(M_2(y.mu))
     nll = np.log(2 * np.pi) + 0.5 * (mu_norm_sq - y_dot_mu ** 2) - log_M2
 
-    return nll.mean()
+    return _beta_nll_reduce(nll, mu_norm_sq, beta)
 
 
 class IAG(BaseDistribution):
@@ -166,7 +194,7 @@ class IAG(BaseDistribution):
 # Elliptically Symmetric Angular Gaussian (ESAG)
 # ---------------------------------------------------------------------------
 
-def esag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def esag_nll_loss(pred: Tensor, y_true: Tensor, beta: float = 0.5) -> Tensor:
     """
     Elliptically Symmetric Angular Gaussian (ESAG) negative log-likelihood loss.
 
@@ -189,9 +217,12 @@ def esag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
               - pred[:, 3:5] = gamma = (gamma_1, gamma_2) (shape parameters for ellipticity)
               Setting gamma = (0, 0) recovers the IAG distribution.
         y_true: [B, 3] true unit direction vectors on S^2.
+        beta: β-NLL weighting (Seitzer et al. 2022). Each sample is reweighted
+              by detach(||mu||^2)^(-beta); beta=0 recovers standard mean NLL.
+              Default 0.5.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Scalar (β-)NLL loss over the batch.
     """
     mu = pred[:, :3]      # [B, 3]
     gamma1 = pred[:, 3]   # [B]
@@ -238,7 +269,7 @@ def esag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
            + 0.5 * (mu_norm_sq - y_dot_mu ** 2 / y_Vinv_y)
            - log_M2)
 
-    return nll.mean()
+    return _beta_nll_reduce(nll, mu_norm_sq, beta)
 
 
 class ESAG(BaseDistribution):
@@ -326,7 +357,7 @@ class ESAG(BaseDistribution):
 # General Angular Gaussian (GAG)
 # ---------------------------------------------------------------------------
 
-def gag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def gag_nll_loss(pred: Tensor, y_true: Tensor, beta: float = 0.5) -> Tensor:
     """General Angular Gaussian (GAG) negative log-likelihood loss.
 
     The GAG is the full 8-parameter angular Gaussian on S^2, with density:
@@ -346,9 +377,12 @@ def gag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
               - pred[:, 3:6] = raw log-diagonal of Cholesky factor L
               - pred[:, 6:9] = off-diagonal entries (L_21, L_31, L_32)
         y_true: [B, 3] true unit direction vectors on S^2.
+        beta: β-NLL weighting (Seitzer et al. 2022). Each sample is reweighted
+              by detach(mu^T V^{-1} mu)^(-beta), the natural concentration
+              scalar for GAG. beta=0 recovers standard mean NLL. Default 0.5.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Scalar (β-)NLL loss over the batch.
     """
     mu = pred[:, :3]                           # [B, 3]
     y = F.normalize(y_true, p=2, dim=1)        # [B, 3]
@@ -374,7 +408,7 @@ def gag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
            + 0.5 * (S - T ** 2)
            - log_M2)
 
-    return nll.mean()
+    return _beta_nll_reduce(nll, S, beta)
 
 
 class GAG(BaseDistribution):

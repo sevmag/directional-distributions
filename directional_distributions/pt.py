@@ -162,7 +162,7 @@ def _pt_log_density(A: Tensor, B: Tensor, Gamma_sq: Tensor, nu: int) -> Tensor:
 # Isotropic Projected t (IPT)
 # ---------------------------------------------------------------------------
 
-def ipt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 3) -> Tensor:
+def ipt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
     """Isotropic Projected t (IPT) negative log-likelihood loss.
 
     The IPT is the projected t with Σ = I, making it rotationally
@@ -202,7 +202,7 @@ class IPT(BaseDistribution):
 
     n_params = 3
 
-    def __init__(self, pred: Tensor, nu: int = 3) -> None:
+    def __init__(self, pred: Tensor, nu: int = 5) -> None:
         super().__init__(pred)
         if not (isinstance(nu, int) and nu >= 1):
             raise ValueError(f"nu must be a positive integer, got {nu}")
@@ -246,7 +246,7 @@ class IPT(BaseDistribution):
 # Elliptically Symmetric Projected t (EPT)
 # ---------------------------------------------------------------------------
 
-def ept_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 3) -> Tensor:
+def ept_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
     """Elliptically Symmetric Projected t (EPT) negative log-likelihood loss.
 
     The EPT generalises IPT with ellipse-like contours on the sphere,
@@ -312,7 +312,7 @@ class EPT(BaseDistribution):
 
     n_params = 5
 
-    def __init__(self, pred: Tensor, nu: int = 3) -> None:
+    def __init__(self, pred: Tensor, nu: int = 5) -> None:
         super().__init__(pred)
         if not (isinstance(nu, int) and nu >= 1):
             raise ValueError(f"nu must be a positive integer, got {nu}")
@@ -379,7 +379,7 @@ class EPT(BaseDistribution):
 # General Projected t (GPT)
 # ---------------------------------------------------------------------------
 
-def gpt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 3) -> Tensor:
+def gpt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
     """General Projected t (GPT) negative log-likelihood loss.
 
     The GPT is the full 9-parameter projected t on S², with Σ⁻¹
@@ -430,7 +430,7 @@ class GPT(BaseDistribution):
 
     n_params = 9
 
-    def __init__(self, pred: Tensor, nu: int = 3) -> None:
+    def __init__(self, pred: Tensor, nu: int = 5) -> None:
         super().__init__(pred)
         if not (isinstance(nu, int) and nu >= 1):
             raise ValueError(f"nu must be a positive integer, got {nu}")
