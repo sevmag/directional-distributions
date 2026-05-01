@@ -18,7 +18,12 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._base import BaseDistribution, _construct_orthonormal_basis, _build_cholesky
+from ._base import (
+    BaseDistribution,
+    _apply_reduction,
+    _construct_orthonormal_basis,
+    _build_cholesky,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +104,7 @@ def _sc_log_density(A: Tensor, B: Tensor, Gamma_sq: Tensor) -> Tensor:
 # Spherical Isotropic Projected Cauchy (SIPC)
 # ---------------------------------------------------------------------------
 
-def sipc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def sipc_nll_loss(pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
     """
     Spherical Isotropic Projected Cauchy (SIPC) negative log-likelihood loss.
 
@@ -119,9 +124,10 @@ def sipc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
               concentration (higher = more peaked), and mu/||mu|| is the mean
               direction.
         y_true: [B, 3] true unit direction vectors on S^2.
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Reduced NLL loss (scalar for ``"mean"``/``"sum"``, [B] for ``"none"``).
     """
     mu = pred                                       # [B, 3]
     y = F.normalize(y_true, p=2, dim=1)             # [B, 3]
@@ -131,7 +137,7 @@ def sipc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
     B = torch.ones_like(A)                           # [B]
     Gamma_sq = (mu ** 2).sum(dim=1)                  # [B]
 
-    return -_sc_log_density(A, B, Gamma_sq).mean()
+    return _apply_reduction(-_sc_log_density(A, B, Gamma_sq), reduction)
 
 
 class SIPC(BaseDistribution):
@@ -184,7 +190,7 @@ class SIPC(BaseDistribution):
 # Spherical Elliptically Symmetric Projected Cauchy (SESPC)
 # ---------------------------------------------------------------------------
 
-def sespc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def sespc_nll_loss(pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
     """
     Spherical Elliptically Symmetric Projected Cauchy (SESPC) NLL loss.
 
@@ -202,9 +208,10 @@ def sespc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
               - pred[:, 3:5] = gamma = (gamma_1, gamma_2) (shape parameters for ellipticity)
               Setting gamma = (0, 0) recovers the SIPC distribution.
         y_true: [B, 3] true unit direction vectors on S^2.
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Reduced NLL loss (scalar for ``"mean"``/``"sum"``, [B] for ``"none"``).
     """
     mu = pred[:, :3]                                  # [B, 3]
     gamma1 = pred[:, 3]                               # [B]
@@ -235,7 +242,7 @@ def sespc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
 
     B = torch.clamp(B, min=1e-8)                      # [B]
 
-    return -_sc_log_density(A, B, Gamma_sq).mean()
+    return _apply_reduction(-_sc_log_density(A, B, Gamma_sq), reduction)
 
 
 class SESPC(BaseDistribution):
@@ -310,7 +317,7 @@ class SESPC(BaseDistribution):
 # General Spherical Projected Cauchy (GSPC)
 # ---------------------------------------------------------------------------
 
-def gspc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def gspc_nll_loss(pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
     """General Spherical Projected Cauchy (GSPC) negative log-likelihood loss.
 
     The GSPC is the full 8-parameter projected Cauchy on S^2, with density
@@ -327,9 +334,10 @@ def gspc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
               - pred[:, 3:6] = raw log-diagonal of Cholesky factor L
               - pred[:, 6:9] = off-diagonal entries (L_21, L_31, L_32)
         y_true: [B, 3] true unit direction vectors on S^2.
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Reduced NLL loss (scalar for ``"mean"``/``"sum"``, [B] for ``"none"``).
     """
     mu = pred[:, :3]                                   # [B, 3]
     y = F.normalize(y_true, p=2, dim=1)                # [B, 3]
@@ -343,7 +351,7 @@ def gspc_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
     Gamma_sq = (z_mu ** 2).sum(dim=1)                  # ||z_mu||^2 = mu^T Sigma^{-1} mu  [B]
     A = (z_y * z_mu).sum(dim=1)                        # z_y.z_mu = y^T Sigma^{-1} mu  [B]
 
-    return -_sc_log_density(A, B, Gamma_sq).mean()
+    return _apply_reduction(-_sc_log_density(A, B, Gamma_sq), reduction)
 
 
 class GSPC(BaseDistribution):

@@ -34,7 +34,12 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._base import BaseDistribution, _construct_orthonormal_basis, _build_cholesky
+from ._base import (
+    BaseDistribution,
+    _apply_reduction,
+    _construct_orthonormal_basis,
+    _build_cholesky,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +167,9 @@ def _pt_log_density(A: Tensor, B: Tensor, Gamma_sq: Tensor, nu: int) -> Tensor:
 # Isotropic Projected t (IPT)
 # ---------------------------------------------------------------------------
 
-def ipt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
+def ipt_nll_loss(
+    pred: Tensor, y_true: Tensor, nu: int = 5, reduction: str = "mean"
+) -> Tensor:
     """Isotropic Projected t (IPT) negative log-likelihood loss.
 
     The IPT is the projected t with Σ = I, making it rotationally
@@ -185,7 +192,7 @@ def ipt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
     B = torch.ones_like(A)                             # [B]
     Gamma_sq = (mu ** 2).sum(dim=1)                    # [B]
 
-    return -_pt_log_density(A, B, Gamma_sq, nu).mean()
+    return _apply_reduction(-_pt_log_density(A, B, Gamma_sq, nu), reduction)
 
 
 class IPT(BaseDistribution):
@@ -246,7 +253,9 @@ class IPT(BaseDistribution):
 # Elliptically Symmetric Projected t (EPT)
 # ---------------------------------------------------------------------------
 
-def ept_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
+def ept_nll_loss(
+    pred: Tensor, y_true: Tensor, nu: int = 5, reduction: str = "mean"
+) -> Tensor:
     """Elliptically Symmetric Projected t (EPT) negative log-likelihood loss.
 
     The EPT generalises IPT with ellipse-like contours on the sphere,
@@ -294,7 +303,7 @@ def ept_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
 
     B = torch.clamp(B, min=1e-8)                        # [B]
 
-    return -_pt_log_density(A, B, Gamma_sq, nu).mean()
+    return _apply_reduction(-_pt_log_density(A, B, Gamma_sq, nu), reduction)
 
 
 class EPT(BaseDistribution):
@@ -379,7 +388,9 @@ class EPT(BaseDistribution):
 # General Projected t (GPT)
 # ---------------------------------------------------------------------------
 
-def gpt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
+def gpt_nll_loss(
+    pred: Tensor, y_true: Tensor, nu: int = 5, reduction: str = "mean"
+) -> Tensor:
     """General Projected t (GPT) negative log-likelihood loss.
 
     The GPT is the full 9-parameter projected t on S², with Σ⁻¹
@@ -409,7 +420,7 @@ def gpt_nll_loss(pred: Tensor, y_true: Tensor, nu: int = 5) -> Tensor:
     Gamma_sq = (z_mu ** 2).sum(dim=1)                    # [B]
     A = (z_y * z_mu).sum(dim=1)                          # [B]
 
-    return -_pt_log_density(A, B, Gamma_sq, nu).mean()
+    return _apply_reduction(-_pt_log_density(A, B, Gamma_sq, nu), reduction)
 
 
 class GPT(BaseDistribution):

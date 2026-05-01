@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._base import BaseDistribution
+from ._base import BaseDistribution, _apply_reduction
 
 
 def _log_normalizer(kappa: Tensor) -> Tensor:
@@ -22,7 +22,7 @@ def _log_normalizer(kappa: Tensor) -> Tensor:
     return (2.0 + kappa) * np.log(2) + np.log(np.pi) - torch.log1p(kappa)
 
 
-def ps_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def ps_nll_loss(pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
     """Power Spherical negative log-likelihood loss on S² (d=3).
 
     The Power Spherical distribution has density:
@@ -38,9 +38,10 @@ def ps_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
     Args:
         pred: [B, 3] predicted mean vectors μ.  Direction = μ/‖μ‖, κ = ‖μ‖.
         y_true: [B, 3] true unit direction vectors on S².
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Reduced NLL loss (scalar for ``"mean"``/``"sum"``, [B] for ``"none"``).
     """
     y = F.normalize(y_true, p=2, dim=1)
     mu_hat = F.normalize(pred, p=2, dim=1)
@@ -51,7 +52,7 @@ def ps_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
     # NLL = log N(κ) - κ · log(1 + μ̂·y)
     nll = _log_normalizer(kappa) - kappa * torch.log1p(dot.clamp(min=-1 + 1e-7))
 
-    return nll.mean()
+    return _apply_reduction(nll, reduction)
 
 
 class PowerSpherical(BaseDistribution):

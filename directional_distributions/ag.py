@@ -17,7 +17,12 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._base import BaseDistribution, _construct_orthonormal_basis, _build_cholesky
+from ._base import (
+    BaseDistribution,
+    _apply_reduction,
+    _construct_orthonormal_basis,
+    _build_cholesky,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +76,7 @@ def _log_M2(alpha: Tensor) -> Tensor:
 # Isotropic Angular Gaussian (IAG)
 # ---------------------------------------------------------------------------
 
-def iag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def iag_nll_loss(pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
     """
     Isotropic Angular Gaussian (IAG) negative log-likelihood loss.
 
@@ -92,9 +97,10 @@ def iag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
         pred: [B, 3] predicted mean vectors mu. The magnitude ||mu|| controls
               concentration (higher = more peaked), and mu/||mu|| is the mean direction.
         y_true: [B, 3] true unit direction vectors on S^2.
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Reduced NLL loss (scalar for ``"mean"``/``"sum"``, [B] for ``"none"``).
     """
     mu = pred  # [B, 3]
 
@@ -111,7 +117,7 @@ def iag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
     # NLL = log(2pi) + 0.5*(||mu||^2 - (y.mu)^2) - log(M_2(y.mu))
     nll = np.log(2 * np.pi) + 0.5 * (mu_norm_sq - y_dot_mu ** 2) - log_M2
 
-    return nll.mean()
+    return _apply_reduction(nll, reduction)
 
 
 class IAG(BaseDistribution):
@@ -166,7 +172,7 @@ class IAG(BaseDistribution):
 # Elliptically Symmetric Angular Gaussian (ESAG)
 # ---------------------------------------------------------------------------
 
-def esag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def esag_nll_loss(pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
     """
     Elliptically Symmetric Angular Gaussian (ESAG) negative log-likelihood loss.
 
@@ -189,9 +195,10 @@ def esag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
               - pred[:, 3:5] = gamma = (gamma_1, gamma_2) (shape parameters for ellipticity)
               Setting gamma = (0, 0) recovers the IAG distribution.
         y_true: [B, 3] true unit direction vectors on S^2.
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Reduced NLL loss (scalar for ``"mean"``/``"sum"``, [B] for ``"none"``).
     """
     mu = pred[:, :3]      # [B, 3]
     gamma1 = pred[:, 3]   # [B]
@@ -238,7 +245,7 @@ def esag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
            + 0.5 * (mu_norm_sq - y_dot_mu ** 2 / y_Vinv_y)
            - log_M2)
 
-    return nll.mean()
+    return _apply_reduction(nll, reduction)
 
 
 class ESAG(BaseDistribution):
@@ -326,7 +333,7 @@ class ESAG(BaseDistribution):
 # General Angular Gaussian (GAG)
 # ---------------------------------------------------------------------------
 
-def gag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
+def gag_nll_loss(pred: Tensor, y_true: Tensor, reduction: str = "mean") -> Tensor:
     """General Angular Gaussian (GAG) negative log-likelihood loss.
 
     The GAG is the full 8-parameter angular Gaussian on S^2, with density:
@@ -346,9 +353,10 @@ def gag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
               - pred[:, 3:6] = raw log-diagonal of Cholesky factor L
               - pred[:, 6:9] = off-diagonal entries (L_21, L_31, L_32)
         y_true: [B, 3] true unit direction vectors on S^2.
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
 
     Returns:
-        Scalar mean NLL loss over the batch.
+        Reduced NLL loss (scalar for ``"mean"``/``"sum"``, [B] for ``"none"``).
     """
     mu = pred[:, :3]                           # [B, 3]
     y = F.normalize(y_true, p=2, dim=1)        # [B, 3]
@@ -374,7 +382,7 @@ def gag_nll_loss(pred: Tensor, y_true: Tensor) -> Tensor:
            + 0.5 * (S - T ** 2)
            - log_M2)
 
-    return nll.mean()
+    return _apply_reduction(nll, reduction)
 
 
 class GAG(BaseDistribution):

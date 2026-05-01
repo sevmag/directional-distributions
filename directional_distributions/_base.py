@@ -18,6 +18,31 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Reduction helper for *_nll_loss functions
+# ---------------------------------------------------------------------------
+
+def _apply_reduction(loss: Tensor, reduction: str) -> Tensor:
+    """Apply a PyTorch-style reduction to an elementwise loss tensor.
+
+    Args:
+        loss: Per-sample loss tensor.
+        reduction: One of ``"mean"``, ``"sum"``, or ``"none"``.
+
+    Returns:
+        Reduced (or unreduced) loss tensor.
+    """
+    if reduction == "mean":
+        return loss.mean()
+    if reduction == "sum":
+        return loss.sum()
+    if reduction == "none":
+        return loss
+    raise ValueError(
+        f"reduction must be one of 'mean', 'sum', 'none'; got {reduction!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Sphere grid
 # ---------------------------------------------------------------------------
 

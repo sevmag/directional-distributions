@@ -5,22 +5,30 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._base import BaseDistribution
+from ._base import BaseDistribution, _apply_reduction
 
 
 def von_mises_fisher_loss(
-    n_pred: Tensor, n_true: Tensor, kappa_reg: float = 0.0, eps: float = 1e-8
+    n_pred: Tensor,
+    n_true: Tensor,
+    kappa_reg: float = 0.0,
+    eps: float = 1e-8,
+    reduction: str = "mean",
 ) -> Tensor:
     """
     von Mises-Fisher loss with coupled direction and κ.
 
     Expects n_pred [B,3]: direction = normalize(n_pred), κ = ||n_pred||.
+
+    Args:
+        reduction: ``"mean"`` (default), ``"sum"``, or ``"none"``.
     """
     direction = F.normalize(n_pred, p=2, dim=1)
     kappa = n_pred.norm(p=2, dim=1)
     cos_sim = (direction * n_true).sum(dim=1)
     log_C = -kappa + torch.log((kappa + eps) / (1 - torch.exp(-2 * kappa) + 2 * eps))
-    return (-(kappa * cos_sim + log_C) + kappa_reg * kappa).mean()
+    nll = -(kappa * cos_sim + log_C) + kappa_reg * kappa
+    return _apply_reduction(nll, reduction)
 
 
 class VMF(BaseDistribution):
